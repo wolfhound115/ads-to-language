@@ -25,6 +25,18 @@
   <div class="slot-label">Cross-origin ad iframe (google_ads_iframe) — replaced from the parent page</div>
   <iframe id="google_ads_iframe_/123/test_0" src="https://example.com/" width="320" height="50" style="border:0;"></iframe>
 
+  <div class="slot-label">EasyList cosmetic rule (.ad-banner) — replaced via the parsed snapshot</div>
+  <div class="ad-banner" style="width:468px;height:60px;"></div>
+
+  <div class="slot-label">False-positive guard — an .ad-banner full of real text must NOT be replaced</div>
+  <div class="ad-banner" style="width:600px;height:120px;">
+    This block has an ad-like class name but contains a lot of real article text, so the
+    extension should leave it alone. Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+    Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam,
+    quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute
+    irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+  </div>
+
   <div class="slot-label">Late-injected ad (added after 2s) — should be caught by the MutationObserver</div>
   <div id="late-target"></div>
   <script>

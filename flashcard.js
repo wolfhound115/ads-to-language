@@ -25,17 +25,39 @@ window.MZH = window.MZH || {};
       user-select: none;
       color: #3a2f22;
       position: relative;
+      outline: none;
+      transition: box-shadow 120ms ease;
     }
+    .root:hover, .root:focus-visible { box-shadow: 0 2px 10px rgba(90, 70, 40, 0.18); }
+    @media (prefers-color-scheme: dark) {
+      .root { background: linear-gradient(135deg, #2b2620, #332c22); border-color: #4a4032; color: #e8ddc8; }
+      .english { color: #c9b998; }
+      .front-pinyin, .pinyin { color: #d4756f; }
+      .hint, .tag { color: #7a6a52; }
+      .toast { background: rgba(43, 38, 32, 0.94); color: #6fae7e; }
+      .toast .small { color: #a89878; }
+    }
+    .flip { animation: flipIn 180ms ease; }
+    @keyframes flipIn {
+      from { transform: rotateY(65deg) scale(0.98); opacity: 0.35; }
+      to   { transform: none; opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) { .flip { animation: none; } }
     .hanzi { font-weight: 600; line-height: 1.1; }
     .pinyin { color: #b0413e; }
     .english { color: #5a4d3a; }
+    .front-pinyin { color: #b0413e; opacity: 0.7; }
     .btn {
       border: none; border-radius: 6px; cursor: pointer;
-      font-size: 13px; padding: 5px 10px; color: #fff;
+      font-size: 12px; padding: 5px 9px; color: #fff; white-space: nowrap;
+      transition: transform 80ms ease, filter 80ms ease;
     }
     .btn.knew { background: #4a8f5c; }
+    .btn.fuzzy { background: #c99a2e; }
     .btn.missed { background: #c15b4e; }
-    .btn:hover { filter: brightness(1.1); }
+    .btn.speak { background: #8a7a60; }
+    .btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    .btn:active { transform: scale(0.94); }
     .hint {
       position: absolute; bottom: 4px; right: 8px;
       font-size: 10px; color: #b3a184;
@@ -44,17 +66,38 @@ window.MZH = window.MZH || {};
       position: absolute; top: 4px; left: 8px;
       font-size: 9px; letter-spacing: 1px; color: #b3a184;
     }
+    .tag.goal-done { color: #4a8f5c; }
+    .tier {
+      position: absolute; top: 6px; right: 8px;
+      width: 7px; height: 7px; border-radius: 50%;
+    }
+    .tier.new { background: #d8c49a; }
+    .tier.learning { background: #c99a2e; }
+    .tier.tricky { background: #c15b4e; }
+    .tier.known { background: #4a8f5c; }
+    .toast {
+      position: absolute; inset: 0; z-index: 2;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(253, 246, 236, 0.94);
+      color: #4a8f5c; font-weight: 600;
+      animation: flipIn 180ms ease;
+    }
+    .toast .big { font-size: 22px; }
+    .toast .small { font-size: 12px; color: #8a7a60; margin-top: 4px; font-weight: 400; }
     /* --- full card --- */
     .card { flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 12px; }
     .card .pinyin { font-size: 20px; }
     .card .english { font-size: 16px; }
-    .buttons { display: flex; gap: 10px; margin-top: 6px; }
+    .card .front-pinyin { font-size: 15px; }
+    .buttons { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
     /* --- banner strip --- */
-    .banner { flex-direction: row; align-items: center; gap: 14px; padding: 0 14px; text-align: left; }
-    .banner .answer { display: flex; flex-direction: column; justify-content: center; min-width: 0; flex: 1; }
-    .banner .pinyin { font-size: 15px; }
-    .banner .english { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .banner .buttons { margin: 0 0 0 auto; }
+    /* Content is centered as one group; gap/typography are scaled per-slot
+       inline so wide leaderboards don't leave dead space in the middle. */
+    .banner { flex-direction: row; align-items: center; justify-content: center; padding: 0 16px; text-align: left; }
+    .banner .answer { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+    .banner .english { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .banner .buttons { margin-top: 0; }
+    .banner .toast { flex-direction: row; gap: 10px; }
     .hidden { visibility: hidden; }
   `;
 
@@ -78,72 +121,168 @@ window.MZH = window.MZH || {};
     return host;
   };
 
+  function speak(text) {
+    try {
+      if (typeof speechSynthesis === "undefined") return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "zh-CN";
+      speechSynthesis.speak(u);
+    } catch (e) { /* no TTS available */ }
+  }
+
   function setupCard(root, width, height) {
     const banner = isBanner(width, height);
-    let word, revealed;
+    // Narrow banners (320x50 mobile strips) can't fit labelled buttons.
+    const compact = banner && width < 520;
+    const settings = MZH.settings;
+    let word, revealed, busy = false;
 
     const hanziEl = el("div", "hanzi");
+    const frontPinyinEl = el("div", "front-pinyin");
     const answerEl = el("div", "answer");
     const pinyinEl = el("div", "pinyin");
     const englishEl = el("div", "english");
     answerEl.append(pinyinEl, englishEl);
 
     const buttonsEl = el("div", "buttons");
-    const knewBtn = el("button", "btn knew", "\u2713 knew it");
-    const missedBtn = el("button", "btn missed", "\u2717 didn't");
-    buttonsEl.append(knewBtn, missedBtn);
+    const knewBtn = el("button", "btn knew", compact ? "\u2713" : "\u2713 knew it");
+    const fuzzyBtn = el("button", "btn fuzzy", compact ? "~" : "~ fuzzy");
+    const missedBtn = el("button", "btn missed", compact ? "\u2717" : "\u2717 didn't");
+    knewBtn.title = "knew it";
+    fuzzyBtn.title = "fuzzy";
+    missedBtn.title = "didn't know";
+    if (settings.audio && !compact) {
+      const speakBtn = el("button", "btn speak", "\uD83D\uDD0A");
+      speakBtn.title = "pronounce";
+      speakBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        speak(word.hanzi);
+      });
+      buttonsEl.append(speakBtn);
+    }
+    buttonsEl.append(knewBtn, fuzzyBtn, missedBtn);
 
-    const tagEl = el("div", "tag", "HSK");
+    const tagEl = el("div", "tag");
+    const tierEl = el("div", "tier");
     const hintEl = el("div", "hint", "tap to flip");
-    root.append(tagEl, hanziEl, answerEl, buttonsEl, hintEl);
+    root.append(tagEl, tierEl, hanziEl, frontPinyinEl, answerEl, buttonsEl, hintEl);
 
-    // Scale hanzi to the slot.
-    const hanziSize = banner
-      ? Math.min(height * 0.55, 42)
-      : Math.min(height * 0.28, width * 0.22, 64);
-    hanziEl.style.fontSize = hanziSize + "px";
-
-    function next() {
-      word = MZH.pickWord();
-      revealed = false;
-      render();
+    // Scale typography and spacing to the slot. Wider/taller strips get
+    // bigger type and wider gaps instead of clustering everything left.
+    if (banner) {
+      hanziEl.style.fontSize = Math.min(height * 0.6, width * 0.09, 52) + "px";
+      pinyinEl.style.fontSize = Math.min(height * 0.3, 22) + "px";
+      englishEl.style.fontSize = Math.min(height * 0.24, 17) + "px";
+      frontPinyinEl.style.fontSize = Math.min(height * 0.26, 18) + "px";
+      root.style.gap = Math.round(Math.max(compact ? 8 : 14, Math.min(width * 0.06, 56))) + "px";
+      if (compact) {
+        for (const b of [knewBtn, fuzzyBtn, missedBtn]) b.style.padding = "4px 7px";
+        hintEl.style.display = "none"; // no room; tap affordance is obvious enough
+      }
+    } else {
+      hanziEl.style.fontSize = Math.min(height * 0.28, width * 0.22, 64) + "px";
     }
 
-    function render() {
+    function updateTag() {
+      const p = MZH.todayProgress();
+      tagEl.textContent = `HSK ${word.hsk || ""} \u00b7 ${p.done}/${p.goal}`;
+      tagEl.classList.toggle("goal-done", p.done >= p.goal);
+      if (p.done >= p.goal) tagEl.textContent += " \u2713";
+    }
+
+    function next(animate) {
+      if (word) MZH.activeWords.delete(word.index);
+      word = MZH.pickWord();
+      MZH.activeWords.add(word.index);
+      revealed = false;
+      render(animate);
+    }
+
+    function render(animate) {
       hanziEl.textContent = word.hanzi;
+      frontPinyinEl.textContent = word.pinyin;
       pinyinEl.textContent = word.pinyin;
       englishEl.textContent = word.english;
-      answerEl.classList.toggle("hidden", !revealed);
-      buttonsEl.classList.toggle("hidden", !revealed);
+      updateTag();
+      const tier = MZH.tierOf(word.index);
+      tierEl.className = "tier " + tier;
+      tierEl.title = tier;
+
+      const showFrontPinyin = settings.pinyinFront && !revealed;
+      frontPinyinEl.style.display = showFrontPinyin ? "" : "none";
       hintEl.textContent = revealed ? "" : "tap to flip";
-      if (!banner) {
-        // Full card: front shows only hanzi, back shows everything.
-        hanziEl.style.display = "";
+      if (banner) {
+        // visibility keeps the centered layout from jumping on reveal
+        answerEl.classList.toggle("hidden", !revealed);
+        buttonsEl.classList.toggle("hidden", !revealed);
+      } else {
         answerEl.style.display = revealed ? "" : "none";
         buttonsEl.style.display = revealed ? "flex" : "none";
+      }
+
+      if (animate) {
+        root.classList.remove("flip");
+        void root.offsetWidth; // restart the animation
+        root.classList.add("flip");
+      }
+    }
+
+    function showToast(big, small) {
+      busy = true;
+      const toast = el("div", "toast");
+      toast.append(el("div", "big", big), el("div", "small", small));
+      root.appendChild(toast);
+      setTimeout(() => {
+        toast.remove();
+        busy = false;
+        next(true);
+      }, 1100);
+    }
+
+    function answer(result) {
+      if (busy) return;
+      const { mastered } = MZH.recordResult(word.index, result);
+      const p = MZH.todayProgress();
+      if (mastered) {
+        showToast("\u2728 " + word.hanzi, "mastered \u00b7 " + word.english);
+      } else if (p.done === p.goal) {
+        // fires exactly once per day, on whichever card crosses the goal
+        showToast("\uD83C\uDFAF " + p.goal + " reviews", "daily goal reached!");
+      } else {
+        next(true);
+      }
+    }
+
+    function flip() {
+      if (!revealed && !busy) {
+        revealed = true;
+        render(true);
       }
     }
 
     root.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (!revealed) {
-        revealed = true;
-        render();
+      flip();
+    });
+
+    // Keyboard: Enter/Space flips; 1/2/3 answer once revealed.
+    root.tabIndex = 0;
+    root.addEventListener("keydown", (e) => {
+      if (busy) return;
+      if (!revealed && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault();
+        flip();
+      } else if (revealed) {
+        if (e.key === "1") answer("knew");
+        else if (e.key === "2") answer("fuzzy");
+        else if (e.key === "3") answer("missed");
       }
     });
+    knewBtn.addEventListener("click", (e) => { e.stopPropagation(); answer("knew"); });
+    fuzzyBtn.addEventListener("click", (e) => { e.stopPropagation(); answer("fuzzy"); });
+    missedBtn.addEventListener("click", (e) => { e.stopPropagation(); answer("missed"); });
 
-    knewBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      MZH.recordResult(word.index, true);
-      next();
-    });
-    missedBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      MZH.recordResult(word.index, false);
-      next();
-    });
-
-    next();
+    next(false);
   }
 
   function el(tag, className, text) {

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div class="title">学 Ads to Mandarin</div>
+    <div class="streak" id="streak" title="day streak"></div>
+  </header>
+
+  <section class="today">
+    <div class="today-row">
+      <span id="today-label">0 / 20 today</span>
+      <span id="accuracy"></span>
+    </div>
+    <div class="bar"><div class="bar-fill" id="today-bar"></div></div>
+  </section>
+
+  <section class="grid">
+    <div class="cell"><div class="num" id="n-known">0</div><div class="lbl known">known</div></div>
+    <div class="cell"><div class="num" id="n-learning">0</div><div class="lbl learning">learning</div></div>
+    <div class="cell"><div class="num" id="n-tricky">0</div><div class="lbl tricky">tricky</div></div>
+    <div class="cell"><div class="num" id="n-unseen">0</div><div class="lbl unseen">unseen</div></div>
+  </section>
+
+  <section>
+    <div class="section-title">Last 7 days</div>
+    <div class="chart" id="chart"></div>
+  </section>
+
+  <section id="tricky-section" hidden>
+    <div class="section-title">Needs work</div>
+    <ul class="tricky-list" id="tricky-list"></ul>
+  </section>
+
+  <section class="settings">
+    <div class="section-title">Settings</div>
+    <label class="row"><span>Enabled</span><input type="checkbox" id="s-enabled"></label>
+    <label class="row"><span>Deck</span>
+      <select id="s-deck">
+        <option value="both">HSK 1 + 2</option>
+        <option value="all">HSK 1 + 2 + 3</option>
+        <option value="hsk1">HSK 1 only</option>
+        <option value="hsk2">HSK 2 only</option>
+        <option value="hsk3">HSK 3 only</option>
+      </select>
+    </label>
+    <label class="row"><span>Pinyin on front</span><input type="checkbox" id="s-pinyin"></label>
+    <label class="row"><span>Pronunciation button</span><input type="checkbox" id="s-audio"></label>
+    <label class="row"><span>Daily goal</span><input type="number" id="s-goal" min="1" max="500" step="1"></label>
+    <button id="s-site" class="wide-btn"></button>
+    <div class="note">Changes apply when a page is (re)loaded.</div>
+  </section>
+
+  <footer>
+    <button id="reset" class="danger">Reset progress</button>
+  </footer>
+
+  <script src="stats.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

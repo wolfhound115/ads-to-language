@@ -3,18 +3,35 @@
   "name": "Ads to Mandarin",
   "version": "0.1.0",
   "description": "Replaces ads with HSK 1/2 Mandarin flashcards instead of hiding them.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "tabs"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Ads to Mandarin",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["selectors.js", "vocab.js", "flashcard.js", "content.js"],
+      "js": ["selectors.js", "stats.js", "vocab.js", "flashcard.js", "content.js"],
       "run_at": "document_idle",
       "all_frames": false
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["data/vocab.json"],
+      "resources": ["data/vocab.json", "data/easylist-snapshot.txt"],
       "matches": ["<all_urls>"]
     }
   ]
