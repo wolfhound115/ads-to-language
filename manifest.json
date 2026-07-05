@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Ads to Mandarin",
+  "version": "0.1.0",
+  "description": "Replaces ads with HSK 1/2 Mandarin flashcards instead of hiding them.",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["selectors.js", "vocab.js", "flashcard.js", "content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["data/vocab.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

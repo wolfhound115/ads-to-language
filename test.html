@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Ad replacement test page</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 40px auto; }
+    .slot-label { color: #888; font-size: 12px; margin: 24px 0 4px; }
+    ins.adsbygoogle, [id^='div-gpt-ad'], iframe { background: #ddd; display: inline-block; }
+  </style>
+</head>
+<body>
+  <h1>Test page: fake ad slots</h1>
+  <p>Load the extension unpacked, then open this file. Every grey box below should become a flashcard.</p>
+
+  <div class="slot-label">728x90 leaderboard (ins.adsbygoogle) — should get the banner word strip</div>
+  <ins class="adsbygoogle" style="width:728px;height:90px;"></ins>
+
+  <div class="slot-label">300x250 medium rectangle (ins.adsbygoogle) — should get the full flashcard</div>
+  <ins class="adsbygoogle" style="width:300px;height:250px;"></ins>
+
+  <div class="slot-label">GPT container (div-gpt-ad)</div>
+  <div id="div-gpt-ad-1234567890-0" style="width:336px;height:280px;"></div>
+
+  <div class="slot-label">Cross-origin ad iframe (google_ads_iframe) — replaced from the parent page</div>
+  <iframe id="google_ads_iframe_/123/test_0" src="https://example.com/" width="320" height="50" style="border:0;"></iframe>
+
+  <div class="slot-label">Late-injected ad (added after 2s) — should be caught by the MutationObserver</div>
+  <div id="late-target"></div>
+  <script>
+    setTimeout(() => {
+      const ins = document.createElement("ins");
+      ins.className = "adsbygoogle";
+      ins.style.cssText = "width:300px;height:600px;";
+      document.getElementById("late-target").appendChild(ins);
+    }, 2000);
+  </script>
+</body>
+</html>
