@@ -25,9 +25,19 @@
     <div class="cell"><div class="num" id="n-unseen">0</div><div class="lbl unseen">unseen</div></div>
   </section>
 
+  <section class="practice">
+    <button id="practice-toggle" class="wide-btn">练 Practice a card</button>
+    <div id="practice-slot" hidden></div>
+  </section>
+
   <section>
     <div class="section-title">Last 7 days</div>
     <div class="chart" id="chart"></div>
+  </section>
+
+  <section>
+    <div class="section-title">Deck progress</div>
+    <div id="levels"></div>
   </section>
 
   <section id="tricky-section" hidden>
@@ -47,18 +57,35 @@
         <option value="hsk3">HSK 3 only</option>
       </select>
     </label>
+    <label class="row"><span>Direction</span>
+      <select id="s-direction">
+        <option value="zh-en">Read 汉字 → English</option>
+        <option value="en-zh">Recall English → 汉字</option>
+        <option value="mixed">Mixed</option>
+      </select>
+    </label>
     <label class="row"><span>Pinyin on front</span><input type="checkbox" id="s-pinyin"></label>
     <label class="row"><span>Pronunciation button</span><input type="checkbox" id="s-audio"></label>
+    <label class="row"><span>Example sentences</span><input type="checkbox" id="s-sentences"></label>
     <label class="row"><span>Daily goal</span><input type="number" id="s-goal" min="1" max="500" step="1"></label>
+    <label class="row"><span>Max cards per page</span><input type="number" id="s-max" min="1" max="50" step="1"></label>
     <button id="s-site" class="wide-btn"></button>
     <div class="note">Changes apply when a page is (re)loaded.</div>
   </section>
 
   <footer>
+    <div class="lifetime" id="lifetime" hidden></div>
+    <div class="io-row">
+      <button id="export" class="wide-btn">Export progress</button>
+      <button id="import" class="wide-btn">Import</button>
+      <input type="file" id="import-file" accept=".json,application/json" hidden>
+    </div>
     <button id="reset" class="danger">Reset progress</button>
   </footer>
 
   <script src="stats.js"></script>
+  <script src="vocab.js"></script>
+  <script src="flashcard.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

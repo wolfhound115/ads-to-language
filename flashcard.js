@@ -32,6 +32,7 @@ window.MZH = window.MZH || {};
     @media (prefers-color-scheme: dark) {
       .root { background: linear-gradient(135deg, #2b2620, #332c22); border-color: #4a4032; color: #e8ddc8; }
       .english { color: #c9b998; }
+      .english.as-hanzi { color: #e8ddc8; }
       .front-pinyin, .pinyin { color: #d4756f; }
       .hint, .tag { color: #7a6a52; }
       .toast { background: rgba(43, 38, 32, 0.94); color: #6fae7e; }
@@ -46,6 +47,7 @@ window.MZH = window.MZH || {};
     .hanzi { font-weight: 600; line-height: 1.1; }
     .pinyin { color: #b0413e; }
     .english { color: #5a4d3a; }
+    .english.as-hanzi { color: #3a2f22; font-weight: 600; }
     .front-pinyin { color: #b0413e; opacity: 0.7; }
     .btn {
       border: none; border-radius: 6px; cursor: pointer;
@@ -89,6 +91,16 @@ window.MZH = window.MZH || {};
     .card .pinyin { font-size: 20px; }
     .card .english { font-size: 16px; }
     .card .front-pinyin { font-size: 15px; }
+    .example {
+      font-size: 12px; line-height: 1.4; color: #6a5a42;
+      border-top: 1px dashed #dcc9a4; padding-top: 6px; margin-top: 2px;
+      max-width: 100%;
+    }
+    .example .ex-zh { font-size: 14px; }
+    .example .ex-en { opacity: 0.75; }
+    @media (prefers-color-scheme: dark) {
+      .example { color: #bfae90; border-top-color: #4a4032; }
+    }
     .buttons { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
     /* --- banner strip --- */
     /* Content is centered as one group; gap/typography are scaled per-slot
@@ -135,7 +147,7 @@ window.MZH = window.MZH || {};
     // Narrow banners (320x50 mobile strips) can't fit labelled buttons.
     const compact = banner && width < 520;
     const settings = MZH.settings;
-    let word, revealed, busy = false;
+    let word, revealed, reverse = false, busy = false;
 
     const hanziEl = el("div", "hanzi");
     const frontPinyinEl = el("div", "front-pinyin");
@@ -143,6 +155,13 @@ window.MZH = window.MZH || {};
     const pinyinEl = el("div", "pinyin");
     const englishEl = el("div", "english");
     answerEl.append(pinyinEl, englishEl);
+    // Example sentence: only on full cards tall enough to fit it.
+    const showExamples = settings.sentences !== false && !banner && height >= 220;
+    const exampleEl = el("div", "example");
+    const exZhEl = el("div", "ex-zh");
+    const exEnEl = el("div", "ex-en");
+    exampleEl.append(exZhEl, exEnEl);
+    if (showExamples) answerEl.append(exampleEl);
 
     const buttonsEl = el("div", "buttons");
     const knewBtn = el("button", "btn knew", compact ? "\u2713" : "\u2713 knew it");
@@ -169,10 +188,11 @@ window.MZH = window.MZH || {};
 
     // Scale typography and spacing to the slot. Wider/taller strips get
     // bigger type and wider gaps instead of clustering everything left.
+    let hanziFont, englishFont;
     if (banner) {
-      hanziEl.style.fontSize = Math.min(height * 0.6, width * 0.09, 52) + "px";
+      hanziFont = Math.min(height * 0.6, width * 0.09, 52);
+      englishFont = Math.min(height * 0.24, 17);
       pinyinEl.style.fontSize = Math.min(height * 0.3, 22) + "px";
-      englishEl.style.fontSize = Math.min(height * 0.24, 17) + "px";
       frontPinyinEl.style.fontSize = Math.min(height * 0.26, 18) + "px";
       root.style.gap = Math.round(Math.max(compact ? 8 : 14, Math.min(width * 0.06, 56))) + "px";
       if (compact) {
@@ -180,8 +200,12 @@ window.MZH = window.MZH || {};
         hintEl.style.display = "none"; // no room; tap affordance is obvious enough
       }
     } else {
-      hanziEl.style.fontSize = Math.min(height * 0.28, width * 0.22, 64) + "px";
+      hanziFont = Math.min(height * 0.28, width * 0.22, 64);
+      englishFont = 0; // 0 = use the stylesheet size
     }
+    // Reverse (en->zh) cards: English prompt on the front, hanzi as answer.
+    const engFrontFont = banner ? Math.min(height * 0.28, 20) : Math.min(height * 0.12, 22);
+    const hanziAnswerFont = banner ? Math.min(height * 0.45, 32) : Math.min(height * 0.16, 36);
 
     function updateTag() {
       const p = MZH.todayProgress();
@@ -195,20 +219,32 @@ window.MZH = window.MZH || {};
       word = MZH.pickWord();
       MZH.activeWords.add(word.index);
       revealed = false;
+      const dir = settings.direction;
+      reverse = dir === "en-zh" || (dir === "mixed" && Math.random() < 0.5);
       render(animate);
     }
 
     function render(animate) {
-      hanziEl.textContent = word.hanzi;
+      hanziEl.textContent = reverse ? word.english : word.hanzi;
+      hanziEl.style.fontSize = (reverse ? engFrontFont : hanziFont) + "px";
       frontPinyinEl.textContent = word.pinyin;
       pinyinEl.textContent = word.pinyin;
-      englishEl.textContent = word.english;
+      englishEl.textContent = reverse ? word.hanzi : word.english;
+      englishEl.classList.toggle("as-hanzi", reverse);
+      englishEl.style.fontSize = reverse
+        ? hanziAnswerFont + "px"
+        : (englishFont ? englishFont + "px" : "");
+      if (showExamples) {
+        exampleEl.style.display = word.ex ? "" : "none";
+        exZhEl.textContent = word.ex ? word.ex.zh : "";
+        exEnEl.textContent = word.ex ? word.ex.en : "";
+      }
       updateTag();
       const tier = MZH.tierOf(word.index);
       tierEl.className = "tier " + tier;
       tierEl.title = tier;
 
-      const showFrontPinyin = settings.pinyinFront && !revealed;
+      const showFrontPinyin = settings.pinyinFront && !revealed && !reverse;
       frontPinyinEl.style.display = showFrontPinyin ? "" : "none";
       hintEl.textContent = revealed ? "" : "tap to flip";
       if (banner) {

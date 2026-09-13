@@ -1,22 +1,25 @@
-// Popup: stats dashboard + settings.
+// Popup: stats dashboard + practice mode + settings.
 const S = window.MZH.stats;
-const DEFAULT_SETTINGS = {
-  enabled: true,
-  deck: "both",
-  pinyinFront: false,
-  audio: true,
-  dailyGoal: 20,
-  disabledSites: [],
-};
+const DEFAULT_SETTINGS = window.MZH.DEFAULT_SETTINGS;
 
 let settings = { ...DEFAULT_SETTINGS };
 let currentHost = null;
+let lastVocab = [];
 
 const $ = (id) => document.getElementById(id);
 
+function pronounce(text) {
+  try {
+    if (typeof speechSynthesis === "undefined") return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "zh-CN";
+    speechSynthesis.speak(u);
+  } catch (e) { /* no TTS */ }
+}
+
 async function load() {
   const [local, sync, vocabRes, tabs] = await Promise.all([
-    chrome.storage.local.get(["mzhWeights", "mzhStats"]),
+    chrome.storage.local.get(["mzhWeights", "mzhStats", "mzhReplaced"]),
     chrome.storage.sync.get("mzhSettings"),
     fetch("data/vocab.json"),
     chrome.tabs.query({ active: true, currentWindow: true }),
@@ -24,6 +27,7 @@ async function load() {
   const weights = local.mzhWeights || {};
   const stats = local.mzhStats || { days: {}, words: {} };
   const vocab = await vocabRes.json();
+  lastVocab = vocab;
   settings = { ...DEFAULT_SETTINGS, ...(sync.mzhSettings || {}) };
 
   try {
@@ -33,6 +37,11 @@ async function load() {
 
   renderStats(weights, stats, vocab);
   renderSettings();
+
+  const replacedN = local.mzhReplaced || 0;
+  $("lifetime").hidden = replacedN === 0;
+  $("lifetime").textContent =
+    `\u2728 ${replacedN.toLocaleString()} ad${replacedN === 1 ? "" : "s"} turned into learning`;
 }
 
 function renderStats(weights, stats, vocab) {
@@ -78,7 +87,35 @@ function renderStats(weights, stats, vocab) {
     chart.appendChild(col);
   }
 
-  // Tricky words (highest weights first)
+  // Per-level deck progress (words mastered per HSK level)
+  const levelsEl = $("levels");
+  levelsEl.textContent = "";
+  for (const lvl of [1, 2, 3]) {
+    let total = 0, known = 0;
+    for (let i = 0; i < vocab.length; i++) {
+      if (vocab[i].hsk !== lvl) continue;
+      total++;
+      if (S.mastery(weights[i] ?? 1, !!(stats.words || {})[i]) === "known") known++;
+    }
+    const row = document.createElement("div");
+    row.className = "level-row";
+    const label = document.createElement("span");
+    label.className = "level-label";
+    label.textContent = `HSK ${lvl}`;
+    const bar = document.createElement("div");
+    bar.className = "bar level-bar";
+    const fill = document.createElement("div");
+    fill.className = "bar-fill";
+    fill.style.width = total ? Math.round((known / total) * 100) + "%" : "0%";
+    bar.appendChild(fill);
+    const count = document.createElement("span");
+    count.className = "level-count";
+    count.textContent = `${known}/${total}`;
+    row.append(label, bar, count);
+    levelsEl.appendChild(row);
+  }
+
+  // Tricky words (highest weights first); click to hear pronunciation
   const tricky = Object.entries(weights)
     .filter(([, w]) => w >= 2)
     .sort((a, b) => b[1] - a[1])
@@ -90,6 +127,8 @@ function renderStats(weights, stats, vocab) {
     const word = vocab[i];
     if (!word) continue;
     const li = document.createElement("li");
+    li.title = "click to pronounce";
+    li.addEventListener("click", () => pronounce(word.hanzi));
     for (const [cls, text] of [["hz", word.hanzi], ["py", word.pinyin], ["en", word.english]]) {
       const span = document.createElement("span");
       span.className = cls;
@@ -103,9 +142,12 @@ function renderStats(weights, stats, vocab) {
 function renderSettings() {
   $("s-enabled").checked = settings.enabled;
   $("s-deck").value = settings.deck;
+  $("s-direction").value = settings.direction || "zh-en";
   $("s-pinyin").checked = settings.pinyinFront;
   $("s-audio").checked = settings.audio;
+  $("s-sentences").checked = settings.sentences !== false;
   $("s-goal").value = settings.dailyGoal;
+  $("s-max").value = settings.maxPerPage;
   renderSiteButton();
 }
 
@@ -129,14 +171,22 @@ function save() {
 function bind() {
   $("s-enabled").addEventListener("change", (e) => { settings.enabled = e.target.checked; save(); });
   $("s-deck").addEventListener("change", (e) => { settings.deck = e.target.value; save(); });
+  $("s-direction").addEventListener("change", (e) => { settings.direction = e.target.value; save(); });
   $("s-pinyin").addEventListener("change", (e) => { settings.pinyinFront = e.target.checked; save(); });
   $("s-audio").addEventListener("change", (e) => { settings.audio = e.target.checked; save(); });
+  $("s-sentences").addEventListener("change", (e) => { settings.sentences = e.target.checked; save(); });
   $("s-goal").addEventListener("change", (e) => {
     const v = parseInt(e.target.value, 10);
     settings.dailyGoal = Number.isFinite(v) && v > 0 ? Math.min(v, 500) : 20;
     e.target.value = settings.dailyGoal;
     save();
     load(); // goal affects the progress bar
+  });
+  $("s-max").addEventListener("change", (e) => {
+    const v = parseInt(e.target.value, 10);
+    settings.maxPerPage = Number.isFinite(v) && v > 0 ? Math.min(v, 50) : 12;
+    e.target.value = settings.maxPerPage;
+    save();
   });
   $("s-site").addEventListener("click", () => {
     if (!currentHost) return;
@@ -151,7 +201,75 @@ function bind() {
     await chrome.storage.local.remove(["mzhWeights", "mzhStats"]);
     load();
   });
+
+  // Practice mode: embeds the real flashcard engine right in the popup.
+  $("practice-toggle").addEventListener("click", () => {
+    const slot = $("practice-slot");
+    if (slot.hidden) {
+      if (!slot.firstChild) slot.appendChild(window.MZH.createCard(272, 170));
+      slot.hidden = false;
+      $("practice-toggle").textContent = "Hide practice card";
+    } else {
+      slot.hidden = true;
+      $("practice-toggle").textContent = "\u7ec3 Practice a card";
+    }
+  });
+
+  $("export").addEventListener("click", async () => {
+    const payload = await buildExport();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `ads-to-mandarin-${S.todayKey()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  $("import").addEventListener("click", () => $("import-file").click());
+  $("import-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      await applyImport(JSON.parse(await file.text()));
+      load();
+    } catch (err) {
+      alert("Import failed: not a valid progress file.");
+    }
+    e.target.value = "";
+  });
 }
+
+// Export/import all progress + settings as one JSON payload.
+async function buildExport() {
+  const local = await chrome.storage.local.get(["mzhWeights", "mzhStats"]);
+  return {
+    app: "ads-to-mandarin",
+    version: 1,
+    exported: new Date().toISOString(),
+    weights: local.mzhWeights || {},
+    stats: local.mzhStats || { days: {}, words: {} },
+    settings,
+  };
+}
+
+async function applyImport(data) {
+  if (!data || data.app !== "ads-to-mandarin" || typeof data.weights !== "object"
+    || typeof data.stats !== "object") {
+    throw new Error("bad payload");
+  }
+  await chrome.storage.local.set({ mzhWeights: data.weights, mzhStats: data.stats });
+  if (data.settings && typeof data.settings === "object") {
+    settings = { ...DEFAULT_SETTINGS, ...data.settings };
+    save();
+  }
+}
+
+// Live refresh: practice-card answers (and reviews in other tabs) update
+// the dashboard immediately.
+try {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && (changes.mzhWeights || changes.mzhStats)) load();
+  });
+} catch (e) { /* onChanged unavailable */ }
 
 bind();
 load();

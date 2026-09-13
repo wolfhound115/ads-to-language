@@ -56,7 +56,9 @@ section { padding: 8px 14px; }
 .tricky-list li {
   display: flex; align-items: baseline; gap: 8px;
   padding: 4px 0; border-bottom: 1px dashed #ecdfc8;
+  cursor: pointer;
 }
+.tricky-list li:hover .hz { color: #b0413e; }
 .tricky-list li:last-child { border-bottom: none; }
 .tricky-list .hz { font-size: 16px; font-weight: 600; }
 .tricky-list .py { color: #b0413e; }
@@ -79,7 +81,19 @@ section { padding: 8px 14px; }
 .wide-btn:hover { background: #f7ead5; }
 .note { font-size: 10px; color: #b3a184; margin-top: 6px; }
 
+.practice { padding-top: 2px; }
+#practice-slot { margin-top: 8px; height: 170px; }
+#practice-slot[hidden] { display: none; }
+
+.level-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.level-label { width: 40px; font-size: 11px; color: #8a7a60; }
+.level-bar { flex: 1; height: 6px; }
+.level-count { width: 52px; text-align: right; font-size: 11px; color: #8a7a60; }
+
 footer { padding: 4px 14px 12px; }
+.lifetime { text-align: center; font-size: 11px; color: #8a7a60; padding-bottom: 6px; }
+.io-row { display: flex; gap: 6px; margin-bottom: 4px; }
+.io-row .wide-btn { margin-top: 0; }
 .danger {
   width: 100%; padding: 6px; border: none; border-radius: 6px;
   background: none; color: #c15b4e; cursor: pointer; font-size: 11px;

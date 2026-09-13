@@ -14,8 +14,11 @@ window.MZH = window.MZH || {};
     enabled: true,
     deck: "both",        // "hsk1" | "hsk2" | "hsk3" | "both" (1+2) | "all"
     pinyinFront: false,  // show pinyin on the front of the card
+    direction: "zh-en",  // "zh-en" (see hanzi) | "en-zh" (recall hanzi) | "mixed"
     audio: true,         // show the pronunciation button
+    sentences: true,     // show example sentences on card backs (when they fit)
     dailyGoal: 20,
+    maxPerPage: 12,      // cap on cards injected per page
     disabledSites: [],   // hostnames where we leave the page alone
   };
   const DECK_LEVELS = {

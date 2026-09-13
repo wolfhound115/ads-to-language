@@ -17,6 +17,9 @@ function assert(cond, msg) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Real chrome.storage returns deserialized copies, never live references.
+const clone = (v) => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
+
 const LONG_TEXT = "This is real article content that happens to sit in a container with an ad-like class name. ".repeat(6);
 const DEFAULT_HTML = `<!DOCTYPE html><html><body>
   <ins class="adsbygoogle" id="banner" style="width:728px;height:90px;"></ins>
@@ -55,7 +58,7 @@ async function makeEnv({ url = "https://example.com/", localData = {}, syncData 
 
   const getAll = (data, keys) => {
     const out = {};
-    for (const k of Array.isArray(keys) ? keys : [keys]) out[k] = data[k];
+    for (const k of Array.isArray(keys) ? keys : [keys]) out[k] = clone(data[k]);
     return out;
   };
   const changeListeners = [];
@@ -64,12 +67,12 @@ async function makeEnv({ url = "https://example.com/", localData = {}, syncData 
     storage: {
       local: {
         get: async (keys) => getAll(localData, keys),
-        set: async (obj) => Object.assign(localData, obj),
+        set: async (obj) => Object.assign(localData, clone(obj)),
         remove: async (keys) => (Array.isArray(keys) ? keys : [keys]).forEach((k) => delete localData[k]),
       },
       sync: {
         get: async (keys) => getAll(syncData, keys),
-        set: async (obj) => Object.assign(syncData, obj),
+        set: async (obj) => Object.assign(syncData, clone(obj)),
       },
       onChanged: { addListener: (fn) => changeListeners.push(fn) },
     },
@@ -85,7 +88,7 @@ async function makeEnv({ url = "https://example.com/", localData = {}, syncData 
   for (const f of ["selectors.js", "stats.js", "vocab.js", "flashcard.js", "content.js"]) {
     window.eval(read(f));
   }
-  await sleep(250); // initial scan + MZH.ready + card population
+  await sleep(400); // initial scan + MZH.ready + card population (snapshot parse is ~300ms cold)
 
   return { window, doc: window.document, shadowRoots, localData, syncData, changeListeners };
 }
@@ -99,30 +102,45 @@ async function makePopupEnv({ localData = {}, syncData = {}, tabUrl = "https://n
     runScripts: "outside-only",
   });
   const { window } = dom;
+  const shadowRoots = new Map();
+  const origAttach = window.Element.prototype.attachShadow;
+  window.Element.prototype.attachShadow = function (init) {
+    const root = origAttach.call(this, init);
+    shadowRoots.set(this, root);
+    return root;
+  };
   const getAll = (data, keys) => {
     const out = {};
-    for (const k of Array.isArray(keys) ? keys : [keys]) out[k] = data[k];
+    for (const k of Array.isArray(keys) ? keys : [keys]) out[k] = clone(data[k]);
     return out;
   };
+  const changeListeners = [];
+  const fireLocalChange = (obj) => changeListeners.forEach((fn) =>
+    fn(Object.fromEntries(Object.keys(obj).map((k) => [k, { newValue: obj[k] }])), "local"));
   window.chrome = {
+    runtime: { getURL: (p) => p },
     storage: {
       local: {
         get: async (keys) => getAll(localData, keys),
+        set: async (obj) => { Object.assign(localData, clone(obj)); fireLocalChange(clone(obj)); },
         remove: async (keys) => (Array.isArray(keys) ? keys : [keys]).forEach((k) => delete localData[k]),
       },
       sync: {
         get: async (keys) => getAll(syncData, keys),
-        set: async (obj) => Object.assign(syncData, obj),
+        set: async (obj) => Object.assign(syncData, clone(obj)),
       },
+      onChanged: { addListener: (fn) => changeListeners.push(fn) },
     },
     tabs: { query: async () => [{ url: tabUrl }] },
   };
-  window.fetch = async () => ({ json: async () => JSON.parse(vocabJson) });
+  window.fetch = async () => ({
+    json: async () => JSON.parse(vocabJson),
+    text: async () => "",
+  });
   window.confirm = () => true;
-  window.eval(read("stats.js"));
-  window.eval(read("popup.js"));
-  await sleep(50);
-  return { window, doc: window.document, localData, syncData };
+  for (const f of ["stats.js", "vocab.js", "flashcard.js", "popup.js"]) window.eval(read(f));
+  await sleep(80);
+  return { window, doc: window.document, shadowRoots, localData, syncData, changeListeners };
 }
 
 async function main() {
@@ -264,12 +282,15 @@ async function main() {
   // ---------- mastered moment ----------
   console.log("\n[mastered moment]");
   const MZH = window.MZH;
-  let res = MZH.recordResult(299, "knew");
+  // Pick an index the earlier random card clicks can't have touched.
+  const fresh = [...Array(vocab.length).keys()]
+    .find((i) => !((env.localData.mzhWeights || {})[i]));
+  let res = MZH.recordResult(fresh, "knew");
   assert(Math.abs(res.weight - 0.5) < 1e-9 && !res.mastered, "recordResult returns weight, not yet mastered");
-  MZH.recordResult(299, "knew");
-  res = MZH.recordResult(299, "knew");
+  MZH.recordResult(fresh, "knew");
+  res = MZH.recordResult(fresh, "knew");
   assert(res.weight === 0.125 && res.mastered, "third 'knew' hits min weight -> mastered=true");
-  res = MZH.recordResult(299, "knew");
+  res = MZH.recordResult(fresh, "knew");
   assert(!res.mastered, "already-mastered word doesn't re-trigger");
 
   // ---------- MutationObserver ----------
@@ -323,10 +344,63 @@ async function main() {
   assert(pfShadow.querySelector(".front-pinyin").style.display === "none",
     "front pinyin hidden after flip (answer shows it)");
 
+  // ---------- settings: reverse direction ----------
+  const rev = await makeEnv({ syncData: { mzhSettings: { direction: "en-zh" } } });
+  const revCard = [...rev.doc.querySelectorAll("[data-mzh-card]")].find((c) => c.style.width === "300px");
+  const revShadow = rev.shadowRoots.get(revCard);
+  const frontText = revShadow.querySelector(".hanzi").textContent;
+  assert(/[a-z]/i.test(frontText) && !vocab.some((w) => w.hanzi === frontText),
+    "en-zh: front shows the English prompt");
+  assert(revShadow.querySelector(".front-pinyin").style.display === "none",
+    "en-zh: no pinyin hint on the front");
+  click(rev.window, revShadow.querySelector(".root"));
+  const revAnswer = revShadow.querySelector(".english");
+  assert(revAnswer.classList.contains("as-hanzi") && vocab.some((w) => w.hanzi === revAnswer.textContent),
+    "en-zh: answer reveals the hanzi");
+  assert(vocab.find((w) => w.hanzi === revAnswer.textContent).english === frontText,
+    "en-zh: hanzi answer matches the English prompt");
+
   // ---------- settings: audio off ----------
   const noAudio = await makeEnv({ syncData: { mzhSettings: { audio: false } } });
   const naShadow = noAudio.shadowRoots.get(noAudio.doc.querySelector("[data-mzh-card]"));
   assert(!naShadow.querySelector(".btn.speak"), "audio=false hides pronunciation button");
+
+  // ---------- lifetime replaced counter ----------
+  console.log("\n[replaced counter]");
+  await sleep(600); // debounced write is 500ms
+  assert(env.localData.mzhReplaced >= 6, `lifetime counter recorded replacements (got ${env.localData.mzhReplaced})`);
+
+  // ---------- max cards per page ----------
+  const capped = await makeEnv({ syncData: { mzhSettings: { maxPerPage: 2 } } });
+  assert(capped.doc.querySelectorAll("[data-mzh-card]").length === 2,
+    "maxPerPage=2 caps injected cards");
+
+  // ---------- example sentences ----------
+  console.log("\n[example sentences]");
+  const exWords = vocab.filter((w) => w.ex);
+  assert(exWords.length === 134 && exWords.every((w) => w.ex.zh && w.ex.py && w.ex.en),
+    "134 curated sentences, each with zh/py/en");
+  assert(exWords.every((w) => w.ex.zh.includes(w.hanzi)),
+    "every sentence actually uses its word");
+  {
+    const exShadow = shadowRoots.get(cards.find((c) => c.style.width === "300px"));
+    const exEl = exShadow.querySelector(".example");
+    assert(exEl, "300x250 card back has an example slot");
+    const hz = exShadow.querySelector(".hanzi").textContent;
+    const w = vocab.find((v) => v.hanzi === hz);
+    if (w && w.ex) {
+      assert(exEl.style.display !== "none" && exShadow.querySelector(".ex-zh").textContent === w.ex.zh,
+        "current word's sentence rendered");
+    } else {
+      assert(exEl.style.display === "none", "no sentence for this word -> example hidden");
+    }
+    const bannerShadow = shadowRoots.get(cards.find((c) => c.style.width === "728px"));
+    assert(!bannerShadow.querySelector(".example"), "banner strips never show sentences");
+  }
+  const noSent = await makeEnv({ syncData: { mzhSettings: { sentences: false } } });
+  const nsShadow = noSent.shadowRoots.get(
+    [...noSent.doc.querySelectorAll("[data-mzh-card]")].find((c) => c.style.width === "300px"));
+  assert(!nsShadow.querySelector(".example"), "sentences=false removes the example slot");
 
   // ---------- tier indicator ----------
   console.log("\n[tier indicator]");
@@ -429,10 +503,54 @@ async function main() {
   await sleep(20);
   assert(pop.syncData.mzhSettings.disabledSites.includes("news.site"), "site disable saved");
   assert(pd.getElementById("s-site").textContent === "Enable on news.site", "site button flips label");
+  // per-level deck progress (weights 0.125 on index 0 => 1 known HSK1 word)
+  const levelRows = [...pd.querySelectorAll("#levels .level-row")];
+  assert(levelRows.length === 3, "3 per-level progress rows");
+  assert(levelRows[0].querySelector(".level-count").textContent === "1/150",
+    "HSK1 row counts the known word");
+  assert(levelRows[2].querySelector(".level-count").textContent === "0/297", "HSK3 row starts empty");
+
+  // tricky list is clickable for pronunciation
+  const trickyLi = pd.querySelector("#tricky-list li");
+  assert(trickyLi.title === "click to pronounce", "tricky items advertise pronunciation");
+  click(pop.window, trickyLi);
+  assert(true, "tricky click doesn't throw without speechSynthesis");
+
+  // export / import round-trip
+  const payload = await pop.window.buildExport();
+  assert(payload.app === "ads-to-mandarin" && payload.weights["1"] === 4
+    && payload.stats.days[S.todayKey()].r === 5 && payload.settings.dailyGoal === 10,
+    "export payload bundles weights + stats + settings");
+  let importRejected = false;
+  try { await pop.window.applyImport({ nonsense: true }); } catch (e) { importRejected = true; }
+  assert(importRejected, "import rejects invalid payloads");
+
+  // practice mode
+  click(pop.window, pd.getElementById("practice-toggle"));
+  await sleep(80);
+  const pSlot = pd.getElementById("practice-slot");
+  assert(!pSlot.hidden && pSlot.querySelector("[data-mzh-card]"), "practice toggle embeds a real card");
+  const pShadow = pop.shadowRoots.get(pSlot.querySelector("[data-mzh-card]"));
+  assert(pShadow.querySelector(".root").classList.contains("card"), "practice card uses full layout");
+  const before = pd.getElementById("today-label").textContent;
+  click(pop.window, pShadow.querySelector(".root"));
+  click(pop.window, pShadow.querySelector(".btn.knew"));
+  await sleep(80);
+  assert(pd.getElementById("today-label").textContent !== before,
+    "answering the practice card live-refreshes the dashboard");
+  click(pop.window, pd.getElementById("practice-toggle"));
+  assert(pSlot.hidden, "practice toggle hides the card again");
+
   click(pop.window, pd.getElementById("reset"));
   await sleep(50);
   assert(!pop.localData.mzhWeights && !pop.localData.mzhStats, "reset clears weights + stats");
   assert(pd.getElementById("today-label").textContent === "0 / 10 today", "popup re-renders after reset");
+
+  // importing the earlier export restores everything
+  await pop.window.applyImport(payload);
+  await sleep(50);
+  assert(pop.localData.mzhWeights["1"] === 4 && pop.syncData.mzhSettings.dailyGoal === 10,
+    "import restores weights + settings after a reset");
 
   // ---------- vocab data sanity ----------
   console.log("\n[vocab data]");

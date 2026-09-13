@@ -3,9 +3,25 @@
   const MZH = window.MZH;
   const MIN_W = 100; // ignore tracking pixels / collapsed slots
   const MIN_H = 40;
-  const MAX_TEXT = 400;      // real content mislabeled as an ad has lots of text
-  const MAX_REPLACEMENTS = 12; // safety cap so generic rules can't nuke a layout
+  const MAX_TEXT = 400; // real content mislabeled as an ad has lots of text
+  let maxReplacements = 12; // safety cap so generic rules can't nuke a layout
   let replaced = 0;
+
+  // Lifetime "ads replaced" counter (debounced; approximate across tabs).
+  let pendingCount = 0, countTimer = null;
+  function bumpReplacedCounter() {
+    pendingCount++;
+    if (countTimer) return;
+    countTimer = setTimeout(async () => {
+      const n = pendingCount;
+      pendingCount = 0;
+      countTimer = null;
+      try {
+        const { mzhReplaced } = await chrome.storage.local.get("mzhReplaced");
+        await chrome.storage.local.set({ mzhReplaced: (mzhReplaced || 0) + n });
+      } catch (e) { /* extension context gone */ }
+    }, 500);
+  }
 
   function insideOurCard(el) {
     return !!(el.closest && el.closest("[data-mzh-card]"));
@@ -16,7 +32,7 @@
   // reach inside the frame — we just measure it from the parent document
   // and replace the node itself.
   function replaceAd(el) {
-    if (replaced >= MAX_REPLACEMENTS) return;
+    if (replaced >= maxReplacements) return;
     if (!el.isConnected || insideOurCard(el)) return;
 
     // Guard against EasyList false positives: ad slots are (nearly) empty
@@ -37,6 +53,7 @@
 
     replaced++;
     el.replaceWith(MZH.createCard(Math.round(w), Math.round(h)));
+    bumpReplacedCounter();
   }
 
   function scan(root) {
@@ -77,6 +94,7 @@
   await Promise.all([MZH.ready, MZH.selectorsReady]);
   if (!MZH.settings.enabled) return;
   if ((MZH.settings.disabledSites || []).includes(location.hostname)) return;
+  maxReplacements = MZH.settings.maxPerPage || 12;
 
   observer.observe(document.documentElement, { childList: true, subtree: true });
 
